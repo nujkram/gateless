@@ -1,0 +1,23 @@
+{
+  "name": "gateless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord server bootstrap + self-role bot for the Gateless AION 2 legion",
+  "main": "src/bot.js",
+  "scripts": {
+    "invite": "node src/invite.js",
+    "setup": "node src/setup.js",
+    "setup:dry": "node src/setup.js --dry-run",
+    "start": "node src/bot.js",
+    "stop": "node src/stop.js",
+    "check": "node --check src/setup.js && node --check src/bot.js && node -e \"require('./src/lib/panels')\"",
+    "test": "node test/smoke.js && node test/matching.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.28.1",
+    "dotenv": "^16.4.5"
+  }
+}

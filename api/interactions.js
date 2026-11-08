@@ -50,11 +50,18 @@ module.exports = async function handler(req, res) {
     // so that counts as not ready even though nothing errors.
     if (onVercel && !store.usingUpstash) missing.push('storage (add Upstash)');
 
+    // Only while something is wrong: the NAMES (never values) of the
+    // storage variables present, so a prefixed or half-connected store is
+    // visible rather than silently falling back to a file. Dropped once
+    // configured, so a healthy deployment reports nothing extra.
+    const storageEnv = store.usingUpstash ? undefined : store.storageEnvNames();
+
     return res.status(200).json({
       service: 'gateless',
       ready: missing.length === 0,
       missing,
       config,
+      storageEnv,
       note: missing.length
         ? 'Set the missing variables in Vercel, redeploy, then set the Interactions Endpoint URL in the Developer Portal.'
         : 'Ready. Set this URL as the Interactions Endpoint URL in the Developer Portal.',

@@ -18,11 +18,43 @@ const HASH_KEY = 'gateless:roster';
 const FILE = path.join(__dirname, '..', '..', 'data', 'roster.json');
 
 // Vercel's marketplace integration sets KV_*; a direct Upstash account sets
-// UPSTASH_*. Accept either so neither setup needs special instructions.
-const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// UPSTASH_*. Vercel also lets you give a store an environment-variable
+// prefix, which turns KV_REST_API_URL into e.g. STORAGE_KV_REST_API_URL —
+// so match on the suffix rather than insisting on an exact name, or a
+// perfectly good database looks absent.
+//
+// Note the token suffix does NOT match KV_REST_API_READ_ONLY_TOKEN, which
+// would connect happily and then fail on the first write.
+const URL_SUFFIXES = ['KV_REST_API_URL', 'UPSTASH_REDIS_REST_URL'];
+const TOKEN_SUFFIXES = ['KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN'];
+
+function findEnv(suffixes) {
+  for (const suffix of suffixes) {
+    // An exact name wins over a prefixed one.
+    if (process.env[suffix]) return { name: suffix, value: process.env[suffix] };
+    const match = Object.keys(process.env)
+      .filter((k) => k.endsWith(`_${suffix}`) && process.env[k])
+      .sort()[0];
+    if (match) return { name: match, value: process.env[match] };
+  }
+  return { name: null, value: null };
+}
+
+const found = { url: findEnv(URL_SUFFIXES), token: findEnv(TOKEN_SUFFIXES) };
+const url = found.url.value;
+const token = found.token.value;
 
 const usingUpstash = Boolean(url && token);
+
+// Names only — never values. The health endpoint reports these so a
+// misnamed or half-connected store is visible instead of silent.
+const storageEnvNames = () => ({
+  url: found.url.name,
+  token: found.token.name,
+  candidates: Object.keys(process.env)
+    .filter((k) => /(KV_REST|UPSTASH)/i.test(k))
+    .sort(),
+});
 
 // ── upstash ────────────────────────────────────────────────────────────────
 
@@ -116,6 +148,7 @@ const backend = usingUpstash ? upstash : file;
 module.exports = {
   ...backend,
   usingUpstash,
+  storageEnvNames,
   describe: () => (usingUpstash ? `Upstash Redis (${new URL(url).host})` : `file (${FILE})`),
   FILE,
   HASH_KEY,

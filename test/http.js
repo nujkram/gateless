@@ -204,6 +204,20 @@ async function endpoint() {
     }
   });
 
+  await check('an unconfigured store reports variable names but no values', async () => {
+    const res = makeRes();
+    await handler(makeReq('GET', '', {}), res);
+    // Local test run has no Upstash, so the diagnostic block should be there.
+    assert.strictEqual(res.body.config.storage, 'file');
+    assert.ok(res.body.storageEnv, 'should report what it looked for');
+    assert.ok(Array.isArray(res.body.storageEnv.candidates));
+    const asText = JSON.stringify(res.body);
+    for (const name of ['KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN']) {
+      const value = process.env[name];
+      if (value) assert.ok(!asText.includes(value), `${name} value leaked`);
+    }
+  });
+
   await check('a GET names what is missing when it is not configured', async () => {
     const saved = process.env.DISCORD_PUBLIC_KEY;
     delete process.env.DISCORD_PUBLIC_KEY;

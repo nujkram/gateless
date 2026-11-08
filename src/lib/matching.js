@@ -127,11 +127,17 @@ function buildStatics(candidates, dungeon) {
 }
 
 // Reports what a group is short of, in words, for the message the bot posts.
+//
+// `any` is the total number of empty seats, and the named archetypes are a
+// subset of them — so "1 tank, 1 healer, 5 more people" reads as though it
+// wants seven. Phrase it as a total with the roles nested inside.
 function describeShortfall(shortfall) {
-  const parts = Object.entries(shortfall).map(([what, n]) =>
-    what === 'any' ? `${n} more ${n === 1 ? 'person' : 'people'}` : `${n} ${what}${n === 1 ? '' : 's'}`
-  );
-  return parts.join(', ');
+  const { any, ...roles } = shortfall;
+  const named = Object.entries(roles).map(([what, n]) => `${n} ${what}${n === 1 ? '' : 's'}`);
+
+  if (any == null) return named.join(', ');
+  const people = `${any} more ${any === 1 ? 'person' : 'people'}`;
+  return named.length ? `${people} (including ${named.join(' and ')})` : people;
 }
 
 module.exports = { classify, buildParty, buildStatics, rotationOrder, describeShortfall, ARCHETYPES };

@@ -20,6 +20,22 @@ checklist. Most of it is clicking. This repo does the clicking:
 | Recruit Officers and Mentors | you |
 | Create the in-game legion, post the first event | you |
 
+## Two ways to run it
+
+**On Vercel** (recommended): Discord POSTs each interaction to an HTTPS
+endpoint, which a serverless function answers. Genuinely 24/7, nothing to keep
+alive. See [Deploying to Vercel](#deploying-to-vercel).
+
+**As a gateway bot on your own machine**: `npm start` holds a WebSocket open.
+Fine for developing, and it only runs while that process does.
+
+Both run the same code. Behaviour lives in `src/core/`, and the two transports
+— `src/bot.js` and `api/interactions.js` — are thin adapters over it, so there
+is no second implementation to keep in step.
+
+`npm run setup` always runs from your machine either way. It is one-off admin,
+not something that needs deploying.
+
 ## Quick start
 
 1. Create the server in Discord and turn on **Community** (Server Settings →
@@ -95,6 +111,64 @@ checklist. Most of it is clicking. This repo does the clicking:
 
 Everything is idempotent. Edit anything under `src/config/` and run it again —
 roles, channels and pinned messages are updated in place, never duplicated.
+
+## Deploying to Vercel
+
+1. **Import the repo** at vercel.com. No build step and no framework — it is
+   just the one function in `api/`.
+
+2. **Add storage.** Vercel's filesystem is ephemeral: anything written to
+   `data/roster.json` there is gone when the function is. In the project's
+   **Storage** tab, add **Upstash Redis** from the marketplace. That sets
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN` for you, both of which the code
+   accepts alongside the `UPSTASH_*` names.
+
+3. **Set the environment variables** in Settings → Environment Variables:
+
+   | Variable | Where it comes from |
+   | --- | --- |
+   | `DISCORD_TOKEN` | Developer Portal → Bot → Reset Token |
+   | `DISCORD_PUBLIC_KEY` | Developer Portal → General Information → Public Key |
+   | `GUILD_ID` | right-click the server icon → Copy Server ID |
+
+4. **Deploy**, then open `https://<your-deployment>.vercel.app/api/interactions`
+   in a browser. It should answer with a small JSON object. If it 500s, the
+   public key is missing.
+
+5. **Point Discord at it.** Developer Portal → General Information →
+   **Interactions Endpoint URL**, set to that same URL, and save. Discord
+   immediately sends a signed PING and refuses to save unless it gets a valid
+   PONG, so a wrong public key fails right here rather than silently later.
+
+6. **Register the commands** from your machine, once:
+
+   ```bash
+   npm run register
+   ```
+
+7. **Bring your roster across**, if you have been running locally:
+
+   ```bash
+   npm run migrate
+   ```
+
+   Put the Upstash URL and token in your local `.env` first, so the script
+   knows where to copy to.
+
+8. **Stop the local bot** — `npm run stop`. Running both means two things
+   answering the same clicks.
+
+### What changes once it is on Vercel
+
+`src/lib/lock.js` stops mattering: there is no long-lived process to duplicate.
+`npm start` still works for local development and shares all the same logic.
+
+The one real constraint is that **Discord closes an interaction after three
+seconds**. Every path is one or two REST calls plus a single storage round
+trip, which fits — `/lfg` reads the whole roster in one request and writes the
+rotation timestamps in one more, rather than a call per member. If a future
+command needs longer, the answer is to reply `DEFERRED` (type 5) and follow up
+with `rest.editReply`, not to hope.
 
 ## Gear and party finding
 
@@ -183,30 +257,50 @@ boot and lists anything it cannot assign.
 ## Layout
 
 ```
+api/
+  interactions.js   Vercel entry: verify the signature, hand to the router
 src/
   config/
-    roles.js      staff roles and their permissions
-    channels.js   categories, channels, permission presets, guest visibility
-    selfroles.js  class / content / timezone buttons, role names, archetypes
-    content.js    the welcome, charter and LFG template texts
-    automod.js    CP-gating keywords and the alert behaviour
-    dungeons.js   content list, item level gates, party shapes
+    roles.js        staff roles and their permissions
+    channels.js     categories, channels, permission presets, guest visibility
+    selfroles.js    class / content / timezone buttons, role names, archetypes
+    content.js      the welcome, charter and LFG template texts
+    automod.js      CP-gating keywords and the alert behaviour
+    dungeons.js     content list, item level gates, party shapes
+    commands.js     slash command definitions, shared by both transports
+  core/             behaviour, with no transport in it
+    profile.js      role names -> class, archetype, timezone
+    selfrole.js     what a button click should add and remove
+    gear.js         recording and viewing gear
+    needs.js        which dungeons someone still wants
+    party.js        /lfg and /static payloads
   lib/
-    client.js     login, guild resolution, permission preflight, logging
-    panels.js     button panel builder (shared by setup and bot)
-    lock.js       single-instance guard
-    gearmodal.js  the Set gear button, its dialog and number parsing
-    roster.js     the JSON store for gear and needs
-    members.js    Discord member -> matching candidate
-    matching.js   eligibility, party building, statics (no Discord, no CP)
-  commands/       one file per slash command
-  setup.js        the one-shot bootstrap
-  bot.js          the long-running command and button handler
-data/
-  roster.json     created on first /gear set, gitignored
+    store.js        roster storage: file locally, Upstash on Vercel
+    roster.js       gear, needs, static interest, rotation timestamps
+    matching.js     eligibility and party building (no Discord, no CP)
+    rest.js         Discord REST with no gateway attached
+    panels.js       button panel builders
+    gearmodal.js    the Set gear dialog and number parsing
+    client.js       gateway login, used by setup.js and bot.js
+    lock.js         single-instance guard (gateway bot only)
+  http/
+    verify.js       Ed25519 signature checking
+    router.js       raw interaction JSON -> response JSON
+  commands/
+    index.js        gateway adapters, each one a call into core/
+  setup.js          the one-shot server bootstrap
+  bot.js            the gateway bot
+  invite.js         prints the invite link
+  stop.js           stops every copy of the gateway bot
+scripts/
+  register-commands.js   registers the slash commands
+  migrate-roster.js      copies data/roster.json into Upstash
 test/
-  smoke.js        config, permissions, pinned content, lock
-  matching.js     party rules and the no-CP invariant
+  smoke.js          config, permissions, pinned content, gear dialog, lock
+  matching.js       party rules and the no-CP invariant
+  http.js           signatures, payload reading, the endpoint end to end
+data/
+  roster.json       local only, gitignored
 ```
 
 ## Charter

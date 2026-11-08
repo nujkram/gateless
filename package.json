@@ -8,16 +8,20 @@
     "invite": "node src/invite.js",
     "setup": "node src/setup.js",
     "setup:dry": "node src/setup.js --dry-run",
+    "register": "node scripts/register-commands.js",
+    "migrate": "node scripts/migrate-roster.js",
     "start": "node src/bot.js",
     "stop": "node src/stop.js",
-    "check": "node --check src/setup.js && node --check src/bot.js && node -e \"require('./src/lib/panels')\"",
-    "test": "node test/smoke.js && node test/matching.js"
+    "check": "node --check src/setup.js && node --check src/bot.js && node --check api/interactions.js && node -e \"require('./src/http/router')\"",
+    "test": "node test/smoke.js && node test/matching.js && node test/http.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "discord.js": "^14.28.1",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "@discordjs/rest": "^2.4.0",
+    "discord-api-types": "^0.37.100"
   }
 }

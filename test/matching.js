@@ -177,12 +177,16 @@ check('a static group is never larger than the content allows', () => {
 check('the matcher source never mentions combat power at all', () => {
   const fs = require('fs');
   const path = require('path');
-  for (const file of ['matching.js', 'members.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8');
+  // Every file between the roster and a party suggestion.
+  for (const file of ['lib/matching.js', 'core/profile.js', 'core/party.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
+    // Strip whole-line comments, which is where the rule is explained.
+    // Checked by prefix rather than a regex: these files are CRLF, and `.`
+    // does not match \r, so /^\s*\/\/.*$/ silently matches nothing.
     const code = src
       .split('\n')
-      .map((l) => l.replace(/^\s*\/\/.*$/, ''))
-      .join('\n'); // strip whole-line comments, where the rule is explained
+      .filter((l) => !l.trimStart().startsWith('//'))
+      .join('\n');
     assert.ok(!/combatPower/.test(code), `${file} reads combatPower outside a comment`);
   }
 });

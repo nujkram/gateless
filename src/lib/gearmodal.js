@@ -1,17 +1,19 @@
 // The "Set gear" button and the dialog behind it.
 //
 // A modal has to be the FIRST reply to the button interaction — you cannot
-// defer and then show one — so bot.js routes this before its usual deferral.
+// defer and then show one — so both transports route this before anything
+// that would reply with a message.
+//
+// What to do with the submitted values lives in src/core/gear.js, so the
+// gateway bot and the Vercel endpoint validate identically.
 
 const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
-  MessageFlags,
 } = require('discord.js');
 
-const roster = require('./roster');
 
 const OPEN_ID = 'gl:gear:open';
 const SUBMIT_ID = 'gl:gear:submit';
@@ -58,45 +60,4 @@ function buildGearModal(record) {
     );
 }
 
-async function handleGearModal(interaction) {
-  const rawItemLevel = interaction.fields.getTextInputValue(FIELD_ITEM_LEVEL);
-  const rawCp = interaction.fields.getTextInputValue(FIELD_CP);
-
-  const parsedItemLevel = parseNumber(rawItemLevel);
-  const parsedCp = parseNumber(rawCp);
-
-  const bad = [];
-  if (parsedItemLevel.error) bad.push('item level');
-  if (parsedCp.error) bad.push('combat power');
-  if (bad.length) {
-    return interaction.reply({
-      content: `I could not read your ${bad.join(' or ')} — whole numbers only (commas are fine).`,
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  if (parsedItemLevel.empty && parsedCp.empty) {
-    return interaction.reply({
-      content: 'Both boxes were blank, so nothing changed.',
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  roster.setGear(interaction.user.id, {
-    itemLevel: parsedItemLevel.value ?? null,
-    combatPower: parsedCp.value ?? null,
-  });
-
-  const lines = [];
-  if (parsedItemLevel.value != null) {
-    lines.push(`Item level: **${parsedItemLevel.value.toLocaleString()}** — used for party matching.`);
-  }
-  if (parsedCp.value != null) {
-    lines.push(`Combat power: **${parsedCp.value.toLocaleString()}** — private, nobody else can see this.`);
-  }
-  lines.push('\nPick what you still need with `/need toggle`.');
-
-  return interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
-}
-
-module.exports = { buildGearModal, handleGearModal, parseNumber, OPEN_ID, SUBMIT_ID, FIELD_ITEM_LEVEL, FIELD_CP };
+module.exports = { buildGearModal, parseNumber, OPEN_ID, SUBMIT_ID, FIELD_ITEM_LEVEL, FIELD_CP };

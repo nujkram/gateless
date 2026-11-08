@@ -9,12 +9,15 @@
 
 const { Events, MessageFlags } = require('discord.js');
 
-const { parseCustomId, roleNameFor, allSelfRoles } = require('./config/selfroles');
+const { parseCustomId, allSelfRoles } = require('./config/selfroles');
 const { connect } = require('./lib/client');
 const { acquire } = require('./lib/lock');
 const commands = require('./commands');
 const roster = require('./lib/roster');
-const { buildGearModal, handleGearModal, OPEN_ID, SUBMIT_ID } = require('./lib/gearmodal');
+const { buildGearModal, OPEN_ID, SUBMIT_ID, FIELD_ITEM_LEVEL, FIELD_CP } = require('./lib/gearmodal');
+const { planSelfRole } = require('./core/selfrole');
+const { profileFromRoleNames } = require('./core/profile');
+const { applyGearModal } = require('./core/gear');
 
 // Reports what the bot can and cannot assign. Never changes anything.
 function auditSelfRoles(guild) {
@@ -51,53 +54,44 @@ async function handleButton(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild;
-  const wanted = roleNameFor(group, option);
-  const target = guild.roles.cache.find((r) => r.name === wanted);
-  if (!target) {
-    trace(interaction, label, `FAILED - no role named "${wanted}"`);
+  const member = await guild.members.fetch(interaction.user.id);
+  const currentNames = member.roles.cache.map((r) => r.name);
+
+  // Same decision the Vercel endpoint makes, from the same function.
+  const plan = planSelfRole(group.id, option.id, currentNames);
+  if (!plan) return interaction.editReply('That button is not one of mine.');
+
+  const resolve = (name) => guild.roles.cache.find((r) => r.name === name);
+  const missing = [...plan.add, ...plan.remove].filter((name) => !resolve(name));
+  if (missing.length) {
+    trace(interaction, label, `FAILED - no role named "${missing[0]}"`);
     return interaction.editReply(
-      `The **${wanted}** role does not exist yet — ping an Officer to run setup.`
+      `The **${missing[0]}** role does not exist yet — ping an Officer to run setup.`
     );
   }
 
   // Catch the common misconfiguration before Discord does, so the member gets
   // a useful sentence instead of a generic failure.
   const botTop = guild.members.me.roles.highest;
-  if (target.position >= botTop.position) {
-    trace(interaction, label, `FAILED - "${wanted}" sits above the bot role "${botTop.name}"`);
+  const tooHigh = [...plan.add, ...plan.remove].find((name) => resolve(name).position >= botTop.position);
+  if (tooHigh) {
+    trace(interaction, label, `FAILED - "${tooHigh}" sits above the bot role "${botTop.name}"`);
     return interaction.editReply(
-      `I can't assign **${option.label}** — my own role sits below it. An Officer needs to drag ` +
-        `**${botTop.name}** above the class roles in Server Settings → Roles.`
+      `I can't change **${option.label}** — my own role sits below **${tooHigh}**. An Officer needs ` +
+        `to drag **${botTop.name}** above the class roles in Server Settings → Roles.`
     );
   }
 
-  const member = await guild.members.fetch(interaction.user.id);
+  if (plan.remove.length) await member.roles.remove(plan.remove.map(resolve));
+  if (plan.add.length) await member.roles.add(plan.add.map(resolve));
 
-  // Clicking what you already have always removes it, in every group.
-  if (member.roles.cache.has(target.id)) {
-    await member.roles.remove(target);
-    trace(interaction, label, `removed ${wanted}`);
-    return interaction.editReply(`Removed **${option.label}**.`);
-  }
+  // Keep the cached class and timezone in step, so /lfg does not need a REST
+  // lookup per member later.
+  const after = currentNames.filter((n) => !plan.remove.includes(n)).concat(plan.add);
+  await roster.cacheProfile(interaction.user.id, profileFromRoleNames(after));
 
-  if (!group.exclusive) {
-    await member.roles.add(target);
-    trace(interaction, label, `added ${wanted} (multi-select)`);
-    return interaction.editReply(`Added **${option.label}**.`);
-  }
-
-  // Exclusive group: drop the other options in this group first.
-  const siblings = group.options
-    .filter((o) => o.id !== option.id)
-    .map((o) => guild.roles.cache.find((r) => r.name === roleNameFor(group, o)))
-    .filter((r) => r && member.roles.cache.has(r.id));
-
-  if (siblings.length) await member.roles.remove(siblings);
-  await member.roles.add(target);
-
-  const replaced = siblings.length ? ` (replaced ${siblings.map((r) => r.name).join(', ')})` : '';
-  trace(interaction, label, `added ${wanted}${replaced}`);
-  return interaction.editReply(`You are now **${option.label}**${replaced}.`);
+  trace(interaction, label, plan.content.replace(/\*\*/g, ''));
+  return interaction.editReply(plan.content);
 }
 
 async function main() {
@@ -137,13 +131,18 @@ async function main() {
       // The gear button opens a dialog. A modal must be the FIRST response to
       // the interaction, so this has to come before handleButton's deferral.
       if (interaction.isButton() && interaction.customId === OPEN_ID) {
-        await interaction.showModal(buildGearModal(roster.get(interaction.user.id)));
+        await interaction.showModal(buildGearModal(await roster.get(interaction.user.id)));
         trace(interaction, 'gear/open', 'opened the gear dialog');
         return;
       }
 
       if (interaction.isModalSubmit() && interaction.customId === SUBMIT_ID) {
-        await handleGearModal(interaction);
+        const result = await applyGearModal(
+          interaction.user.id,
+          interaction.fields.getTextInputValue(FIELD_ITEM_LEVEL),
+          interaction.fields.getTextInputValue(FIELD_CP)
+        );
+        await interaction.reply({ ...result, flags: MessageFlags.Ephemeral });
         trace(interaction, 'gear/submit', 'saved from the dialog');
         return;
       }

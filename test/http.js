@@ -187,11 +187,31 @@ async function endpoint() {
     assert.strictEqual(res.code, 401);
   });
 
-  await check('a browser GET is harmless and says what this is', async () => {
+  await check('a browser GET reports readiness without leaking any value', async () => {
     const res = makeRes();
     await handler(makeReq('GET', '', {}), res);
     assert.strictEqual(res.code, 200);
     assert.strictEqual(res.body.service, 'gateless');
+    assert.strictEqual(typeof res.body.ready, 'boolean');
+    assert.strictEqual(res.body.config.DISCORD_PUBLIC_KEY, true, 'should see the key is present');
+
+    // The whole response must not contain any secret's VALUE.
+    const asText = JSON.stringify(res.body);
+    assert.ok(!asText.includes(PUBLIC_HEX), 'the public key value leaked into the health check');
+    for (const name of ['DISCORD_TOKEN', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN']) {
+      const value = process.env[name];
+      if (value) assert.ok(!asText.includes(value), `${name} value leaked into the health check`);
+    }
+  });
+
+  await check('a GET names what is missing when it is not configured', async () => {
+    const saved = process.env.DISCORD_PUBLIC_KEY;
+    delete process.env.DISCORD_PUBLIC_KEY;
+    const res = makeRes();
+    await handler(makeReq('GET', '', {}), res);
+    assert.strictEqual(res.body.ready, false);
+    assert.ok(res.body.missing.includes('DISCORD_PUBLIC_KEY'));
+    process.env.DISCORD_PUBLIC_KEY = saved;
   });
 
   await check('a missing public key refuses everything rather than trusting it', async () => {

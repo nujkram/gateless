@@ -27,12 +27,37 @@ function readRawBody(req) {
 }
 
 module.exports = async function handler(req, res) {
-  // A plain visit in a browser: say something useful rather than 405.
+  // A plain visit in a browser. Reports whether the deployment is actually
+  // configured, because the alternative is finding out when Discord refuses
+  // to save the endpoint URL and not knowing which variable is missing.
+  //
+  // Booleans only. No value of any secret is ever returned here.
   if (req.method === 'GET') {
+    const store = require('../src/lib/store');
+    const onVercel = process.env.VERCEL === '1';
+    const config = {
+      DISCORD_PUBLIC_KEY: Boolean(process.env.DISCORD_PUBLIC_KEY),
+      DISCORD_TOKEN: Boolean(process.env.DISCORD_TOKEN),
+      GUILD_ID: Boolean(process.env.GUILD_ID),
+      storage: store.usingUpstash ? 'upstash' : 'file',
+    };
+
+    const missing = Object.entries(config)
+      .filter(([k, v]) => k !== 'storage' && !v)
+      .map(([k]) => k);
+
+    // A file-backed roster on Vercel loses everything between invocations,
+    // so that counts as not ready even though nothing errors.
+    if (onVercel && !store.usingUpstash) missing.push('storage (add Upstash)');
+
     return res.status(200).json({
-      ok: true,
       service: 'gateless',
-      note: 'Discord posts interactions here. Nothing to see in a browser.',
+      ready: missing.length === 0,
+      missing,
+      config,
+      note: missing.length
+        ? 'Set the missing variables in Vercel, redeploy, then set the Interactions Endpoint URL in the Developer Portal.'
+        : 'Ready. Set this URL as the Interactions Endpoint URL in the Developer Portal.',
     });
   }
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');

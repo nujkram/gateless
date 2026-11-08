@@ -56,11 +56,18 @@ module.exports = async function handler(req, res) {
     // configured, so a healthy deployment reports nothing extra.
     const storageEnv = store.usingUpstash ? undefined : store.storageEnvNames();
 
+    // Credentials being present is not the same as them working. Ask the
+    // database. One cheap call, and only on a health check — never on the
+    // interaction path, where the 3-second budget lives.
+    const storage = await store.probe();
+    if (!storage.ok) missing.push('storage (credentials present but the database rejected us)');
+
     return res.status(200).json({
       service: 'gateless',
       ready: missing.length === 0,
       missing,
       config,
+      storage,
       storageEnv,
       note: missing.length
         ? 'Set the missing variables in Vercel, redeploy, then set the Interactions Endpoint URL in the Developer Portal.'

@@ -204,6 +204,39 @@ async function endpoint() {
     }
   });
 
+  await check('the health check probes storage rather than trusting the env', async () => {
+    const res = makeRes();
+    await handler(makeReq('GET', '', {}), res);
+    assert.ok(res.body.storage, 'should report a probe result');
+    assert.strictEqual(res.body.storage.backend, 'file');
+    assert.strictEqual(res.body.storage.ok, true);
+  });
+
+  await check('a store that rejects us counts as not ready', async () => {
+    // Credentials present but pointing nowhere: the old check said "upstash"
+    // and ready, which was exactly the failure it was meant to catch.
+    const saved = { ...process.env };
+    process.env.KV_REST_API_URL = 'https://example.invalid';
+    process.env.KV_REST_API_TOKEN = 'bogus';
+    delete require.cache[require.resolve('../src/lib/store')];
+    delete require.cache[require.resolve('../api/interactions')];
+    const fresh = require('../api/interactions');
+
+    const res = makeRes();
+    await fresh(makeReq('GET', '', {}), res);
+    assert.strictEqual(res.body.storage.ok, false, 'a dead database must not read as healthy');
+    assert.strictEqual(res.body.ready, false);
+    assert.ok(res.body.missing.some((m) => m.startsWith('storage')));
+    assert.ok(!JSON.stringify(res.body).includes('bogus'), 'the token leaked into the response');
+
+    for (const k of ['KV_REST_API_URL', 'KV_REST_API_TOKEN']) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    delete require.cache[require.resolve('../src/lib/store')];
+    delete require.cache[require.resolve('../api/interactions')];
+  });
+
   await check('an unconfigured store reports variable names but no values', async () => {
     const res = makeRes();
     await handler(makeReq('GET', '', {}), res);

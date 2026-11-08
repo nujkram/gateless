@@ -143,12 +143,28 @@ const file = {
   },
 };
 
+// Does the storage actually WORK, not just "are the variables present".
+// A wrong token, a deleted database or a typo'd URL all look identical from
+// the environment alone, so the health endpoint asks the database itself.
+// HLEN is cheap and returns no member data.
+async function probe() {
+  if (!usingUpstash) return { ok: true, backend: 'file' };
+  try {
+    const [count] = await pipeline([['HLEN', HASH_KEY]]);
+    return { ok: true, backend: 'upstash', members: Number(count) || 0 };
+  } catch (err) {
+    // Surface the shape of the failure, not the credentials in it.
+    return { ok: false, backend: 'upstash', error: String(err.message).slice(0, 120) };
+  }
+}
+
 const backend = usingUpstash ? upstash : file;
 
 module.exports = {
   ...backend,
   usingUpstash,
   storageEnvNames,
+  probe,
   describe: () => (usingUpstash ? `Upstash Redis (${new URL(url).host})` : `file (${FILE})`),
   FILE,
   HASH_KEY,
